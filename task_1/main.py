@@ -1,43 +1,18 @@
-"""Завдання 1. Алгоритм максимального потоку (Едмондса–Карпа) для логістики.
-
-Програма будує орієнтований граф логістичної мережі:
-
-    Термінали  ->  Склади  ->  Магазини
-
-та знаходить максимальний потік товарів від терміналів до магазинів за
-допомогою алгоритму Едмондса–Карпа (BFS-реалізація методу Форда–Фалкерсона,
-що завжди шукає найкоротший збільшуючий шлях у залишковій мережі).
-
-Оскільки джерел (терміналів) і стоків (магазинів) декілька, до графа додаються
-фіктивне суперджерело ``S`` та суперстік ``T``. Це класичний прийом, який
-дозволяє звести задачу з кількома джерелами/стоками до стандартної задачі
-максимального потоку з одним джерелом та одним стоком.
-"""
-
 import sys
 from collections import defaultdict, deque
 
-# У Windows-консолі типове кодування часто cp1251/cp866 — переходимо на UTF-8,
-# щоб кирилиця у виводі відображалася коректно.
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8")
 
-# "Нескінченна" пропускна здатність для ребер суперджерела/суперстоку.
 INF = 10**9
 
-
-# ---------------------------------------------------------------------------
-# Опис логістичної мережі (ребра та пропускні здатності з умови задачі)
-# ---------------------------------------------------------------------------
 EDGES = [
-    # Термінал -> Склад
     ("Термінал 1", "Склад 1", 25),
     ("Термінал 1", "Склад 2", 20),
     ("Термінал 1", "Склад 3", 15),
     ("Термінал 2", "Склад 3", 15),
     ("Термінал 2", "Склад 4", 30),
     ("Термінал 2", "Склад 2", 10),
-    # Склад -> Магазин
     ("Склад 1", "Магазин 1", 15),
     ("Склад 1", "Магазин 2", 10),
     ("Склад 1", "Магазин 3", 20),
@@ -63,17 +38,14 @@ SUPER_SINK = "T"
 
 
 def build_capacity():
-    """Будує матрицю пропускних здатностей (dict-of-dict) з фіктивними S та T."""
     capacity = defaultdict(lambda: defaultdict(int))
 
     for u, v, cap in EDGES:
         capacity[u][v] += cap
 
-    # Суперджерело -> кожен термінал (необмежено, реально обмежить вихід терміналу).
+    # суперджерело та суперстік для зведення задачі до одного джерела й стоку
     for terminal in TERMINALS:
         capacity[SUPER_SOURCE][terminal] = INF
-
-    # Кожен магазин -> суперстік (необмежено).
     for store in STORES:
         capacity[store][SUPER_SINK] = INF
 
@@ -81,26 +53,16 @@ def build_capacity():
 
 
 def edmonds_karp(capacity, source, sink, trace=None):
-    """Повертає (max_flow, flow), де flow[u][v] — фактичний потік по ребру u->v.
-
-    Реалізація алгоритму Едмондса–Карпа: на кожній ітерації BFS шукає найкоротший
-    (за кількістю ребер) збільшуючий шлях у залишковій мережі та проштовхує по
-    ньому максимально можливий потік (вузьке місце шляху).
-
-    Якщо передано список ``trace``, у нього додаються кортежі (шлях, обсяг) для
-    кожного знайденого збільшуючого шляху — для покрокового звіту.
-    """
-    # Залишкова мережа: residual[u][v] — залишкова пропускна здатність ребра u->v.
     residual = defaultdict(lambda: defaultdict(int))
     for u in capacity:
         for v in capacity[u]:
             residual[u][v] += capacity[u][v]
-            residual[v][u] += 0  # гарантуємо існування зворотного ребра
+            residual[v][u] += 0
 
     max_flow = 0
 
     while True:
-        # --- BFS: пошук найкоротшого збільшуючого шляху source -> sink ---
+        # BFS шукає найкоротший збільшуючий шлях у залишковій мережі
         parent = {source: source}
         queue = deque([source])
         while queue:
@@ -113,9 +75,8 @@ def edmonds_karp(capacity, source, sink, trace=None):
                     queue.append(v)
 
         if sink not in parent:
-            break  # збільшуючих шляхів більше немає -> потік максимальний
+            break
 
-        # --- Вузьке місце знайденого шляху ---
         path_flow = INF
         v = sink
         while v != source:
@@ -123,7 +84,6 @@ def edmonds_karp(capacity, source, sink, trace=None):
             path_flow = min(path_flow, residual[u][v])
             v = u
 
-        # --- Відновлення шляху (для трасування) ---
         if trace is not None:
             path = [sink]
             v = sink
@@ -132,7 +92,6 @@ def edmonds_karp(capacity, source, sink, trace=None):
                 path.append(v)
             trace.append((list(reversed(path)), path_flow))
 
-        # --- Оновлення залишкової мережі вздовж шляху ---
         v = sink
         while v != source:
             u = parent[v]
@@ -142,7 +101,6 @@ def edmonds_karp(capacity, source, sink, trace=None):
 
         max_flow += path_flow
 
-    # Фактичний потік по кожному вихідному ребру = пропускна здатність - залишок.
     flow = defaultdict(lambda: defaultdict(int))
     for u, v, _ in EDGES:
         flow[u][v] = capacity[u][v] - residual[u][v]
@@ -151,14 +109,8 @@ def edmonds_karp(capacity, source, sink, trace=None):
 
 
 def decompose_terminal_to_store(flow):
-    """Розкладає потік на маршрути Термінал -> Склад -> Магазин.
-
-    Для кожного складу виконується баланс: сума вхідного потоку від терміналів
-    дорівнює сумі вихідного потоку до магазинів. Жадібно зіставляємо вхідні
-    «порції» від терміналів з вихідними до магазинів, отримуючи фактичний потік
-    для кожної пари (Термінал, Магазин).
-    """
-    result = defaultdict(int)  # (термінал, магазин) -> обсяг
+    """Розкладає потік на маршрути Термінал -> Склад -> Магазин."""
+    result = defaultdict(int)
 
     for w in WAREHOUSES:
         inflow = {t: flow[t][w] for t in TERMINALS if flow[t][w] > 0}
@@ -184,15 +136,12 @@ def print_report(max_flow, flow, terminal_store_flow, trace):
     print("=" * 60)
     print(f"\nМаксимальний потік у мережі: {max_flow} одиниць\n")
 
-    # --- Покроковий розрахунок: збільшуючі шляхи ---
     print(f"Покроковий розрахунок ({len(trace)} збільшуючих шляхів):")
     for i, (path, amount) in enumerate(trace, 1):
-        # Прибираємо фіктивні вузли S та T для читабельності.
         readable = [node for node in path if node not in (SUPER_SOURCE, SUPER_SINK)]
         print(f"  Крок {i:>2}: {' -> '.join(readable)}  (+{amount})")
     print()
 
-    # --- Потоки по ребрах Термінал -> Склад ---
     print("Потік Термінал -> Склад:")
     for t in TERMINALS:
         for w in WAREHOUSES:
@@ -200,7 +149,6 @@ def print_report(max_flow, flow, terminal_store_flow, trace):
                 print(f"  {t:<12} -> {w:<10}: {flow[t][w]:>3}")
     print()
 
-    # --- Потоки по ребрах Склад -> Магазин ---
     print("Потік Склад -> Магазин:")
     for w in WAREHOUSES:
         for m in STORES:
@@ -208,7 +156,6 @@ def print_report(max_flow, flow, terminal_store_flow, trace):
                 print(f"  {w:<10} -> {m:<11}: {flow[w][m]:>3}")
     print()
 
-    # --- Підсумкова таблиця Термінал -> Магазин ---
     print("=" * 60)
     print(f"{'Термінал':<12} {'Магазин':<12} {'Фактичний Потік (одиниць)':>26}")
     print("-" * 60)
